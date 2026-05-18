@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>DIRECT</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap');
+:root{--pur:#7B61FF;--cyn:#00D4FF;--grn:#32E696;--red:#FF5064;--t1:#F0EBFF;--t2:#9A8DBB;--t3:#4A3F70}
+body{font-family:'Inter',sans-serif;background:#070B14;min-height:100vh;display:flex;align-items:center;justify-content:center;overflow:hidden}
+canvas#bg{position:fixed;inset:0;z-index:0}
+.wrap{position:relative;z-index:10;display:flex;flex-direction:column;align-items:center;gap:36px}
+.logo{display:flex;flex-direction:column;align-items:center;gap:16px}
+.logo h1{font-size:36px;font-weight:900;letter-spacing:10px;background:linear-gradient(135deg,#C89AFF,#7B61FF,#00D4FF);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo p{font-size:9px;font-weight:700;letter-spacing:5px;color:var(--t3)}
+.card{background:rgba(15,23,35,0.88);border:1px solid rgba(123,97,255,0.22);border-radius:24px;padding:44px;width:420px;backdrop-filter:blur(24px);box-shadow:0 0 0 1px rgba(123,97,255,0.08),0 24px 70px rgba(0,0,0,0.55),0 0 100px rgba(123,97,255,0.06);position:relative;overflow:hidden}
+.card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--pur),var(--cyn),transparent)}
+.card-title{font-size:22px;font-weight:800;color:var(--t1);text-align:center;margin-bottom:6px}
+.card-sub{font-size:13px;color:var(--t2);text-align:center;margin-bottom:36px}
+.field{margin-bottom:18px}
+.field label{display:block;font-size:10px;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;color:var(--t3);margin-bottom:8px}
+.field input{width:100%;background:rgba(255,255,255,0.04);border:1px solid rgba(123,97,255,0.18);border-radius:12px;padding:14px 16px;font-size:14px;color:var(--t1);font-family:inherit;outline:none;transition:all .2s}
+.field input:focus{border-color:var(--pur);background:rgba(123,97,255,0.07);box-shadow:0 0 0 3px rgba(123,97,255,0.1)}
+.field input::placeholder{color:var(--t3)}
+.btn{width:100%;padding:15px;margin-top:6px;background:linear-gradient(135deg,var(--pur),#5B41FF);border:none;border-radius:13px;font-size:14px;font-weight:700;color:#fff;cursor:pointer;transition:all .2s;font-family:inherit;letter-spacing:.5px;position:relative;overflow:hidden}
+.btn:hover{transform:translateY(-2px);box-shadow:0 10px 30px rgba(123,97,255,0.45)}
+.btn:active{transform:translateY(0)}
+.err{background:rgba(255,80,100,0.1);border:1px solid rgba(255,80,100,0.3);border-radius:10px;padding:11px;font-size:13px;color:var(--red);margin-top:14px;display:none;text-align:center}
+</style>
+</head>
+<body>
+<canvas id="bg"></canvas>
+<div class="wrap">
+  <div class="logo">
+    <canvas id="hex" width="96" height="96"></canvas>
+    <h1>DIRECT</h1>
+    <p>SESSION MANAGER</p>
+  </div>
+  <div class="card">
+    <div class="card-title">Bentornato</div>
+    <div class="card-sub">Accedi al tuo account personale</div>
+    <div class="field"><label>Username</label><input id="u" type="text" placeholder="Il tuo username" autocomplete="off"></div>
+    <div class="field"><label>Password</label><input id="p" type="password" placeholder="••••••••"></div>
+    <button class="btn" onclick="go()">Accedi →</button>
+    <div class="err" id="err">Credenziali errate. Riprova.</div>
+  </div>
+</div>
+<script>
+// Background
+const c=document.getElementById('bg'),x=c.getContext('2d');
+let t=0,W,H;
+const stars=Array.from({length:80},()=>({x:Math.random(),y:Math.random()*.6,r:Math.random()*2+.5,ph:Math.random()*6.28}));
+const petals=Array.from({length:28},()=>({x:Math.random(),y:Math.random(),r:Math.random()*7+3,rot:Math.random()*360,vx:(Math.random()-.5)*.00018,vy:Math.random()*.00025+.0001,vr:(Math.random()-.5)*.28,a:Math.random()*.16+.04,col:['#FF8AD8','#D98CFF','#B56CFF','#F3A6FF'][Math.floor(Math.random()*4)]}));
+function resize(){W=c.width=innerWidth;H=c.height=innerHeight}
+resize();addEventListener('resize',resize);
+function draw(){
+  const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,'#030410');g.addColorStop(.5,'#060816');g.addColorStop(1,'#080C22');x.fillStyle=g;x.fillRect(0,0,W,H);
+  const n=x.createRadialGradient(W*.72,H*.18,0,W*.72,H*.18,W*.38);n.addColorStop(0,`rgba(55,18,135,${.1+Math.sin(t*.15)*.04})`);n.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=n;x.fillRect(0,0,W,H);
+  stars.forEach(s=>{const p=(Math.sin(t+s.ph)+1)/2;x.beginPath();x.arc(s.x*W,s.y*H,s.r*.5,0,Math.PI*2);x.fillStyle=`rgba(210,200,255,${.25+.5*p})`;x.fill()});
+  const mx=W*.08,my=H*.15,mp=(Math.sin(t*.3)+1)/2;
+  for(let i=5;i>0;i--){const mg=x.createRadialGradient(mx,my,0,mx,my,32+i*13);mg.addColorStop(.55,`rgba(185,145,255,${(3+2*mp)*i*.01})`);mg.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=mg;x.beginPath();x.arc(mx,my,32+i*13,0,Math.PI*2);x.fill()}
+  x.beginPath();x.arc(mx,my,20,0,Math.PI*2);x.fillStyle=`rgba(232,218,255,${.82+.12*mp})`;x.fill();x.strokeStyle=`rgba(195,165,255,.55)`;x.lineWidth=1.5;x.stroke();
+  [[[(0,.73),(.1,.56),(.22,.51),(.38,.59),(.55,.53),(.72,.61),(1,.61),(1,1),(0,1)],'rgba(10,7,32,.7)'],[[(0,.83),(.06,.71),(.18,.76),(.28,.69),(1,.76),(1,1),(0,1)],'rgba(6,4,22,.88)']].forEach(([pts,col])=>{x.beginPath();x.moveTo(pts[0][0]*W,pts[0][1]*H);pts.slice(1).forEach(p=>x.lineTo(p[0]*W,p[1]*H));x.closePath();x.fillStyle=col;x.fill()});
+  petals.forEach(p=>{p.x+=p.vx;p.y+=p.vy;p.rot+=p.vr;if(p.y>1.05){p.y=-.05;p.x=Math.random()}if(p.x<-.05)p.x=1.05;if(p.x>1.05)p.x=-.05;x.save();x.translate(p.x*W,p.y*H);x.rotate(p.rot*Math.PI/180);x.beginPath();x.moveTo(0,-p.r);x.bezierCurveTo(p.r*.55,-p.r,p.r,-p.r*.55,p.r*.7,p.r*.3);x.bezierCurveTo(p.r*.3,p.r*.8,0,p.r,0,p.r);x.bezierCurveTo(0,p.r,-p.r*.3,p.r*.8,-p.r*.7,p.r*.3);x.bezierCurveTo(-p.r,-p.r*.55,-p.r*.55,-p.r,0,-p.r);x.fillStyle=p.col+Math.floor(p.a*255).toString(16).padStart(2,'0');x.fill();x.restore()});
+  const p2=(Math.sin(t*.5)+1)/2;[0,H-2].forEach(y=>{const el=x.createLinearGradient(0,0,W,0);el.addColorStop(0,'rgba(0,0,0,0)');el.addColorStop(.3,`rgba(123,97,255,${.25+.15*p2})`);el.addColorStop(.6,`rgba(0,212,255,${.35+.15*p2})`);el.addColorStop(1,'rgba(0,0,0,0)');x.fillStyle=el;x.fillRect(0,y,W,2)});
+  t+=.016;requestAnimationFrame(draw);
+}draw();
+// Hex logo
+const hc=document.getElementById('hex'),hx=hc.getContext('2d');let ht=0;
+function dh(){hx.clearRect(0,0,96,96);const cx=48,cy=48,p=(Math.sin(ht)+1)/2;
+  for(let i=14;i>0;i--){hx.beginPath();for(let a=0;a<6;a++){const ag=Math.PI/180*(60*a-90);hx.lineTo(cx+(30+i)*Math.cos(ag),cy+(30+i)*Math.sin(ag))}hx.closePath();hx.fillStyle=`rgba(123,97,255,${.04*i*(.2+.6*p)})`;hx.fill()}
+  hx.beginPath();for(let a=0;a<6;a++){const ag=Math.PI/180*(60*a-90);hx.lineTo(cx+24*Math.cos(ag),cy+24*Math.sin(ag))}hx.closePath();
+  const g=hx.createLinearGradient(cx-24,cy-24,cx+24,cy+24);g.addColorStop(0,'#5A32BE');g.addColorStop(1,'#9650FF');hx.fillStyle=g;hx.fill();
+  hx.strokeStyle=`rgba(200,150,255,${.4+.55*p})`;hx.lineWidth=1.8;hx.stroke();
+  hx.fillStyle='rgba(240,235,255,.92)';hx.font='bold 26px Inter';hx.textAlign='center';hx.textBaseline='middle';hx.fillText('D',cx,cy+1);
+  ht+=.025;requestAnimationFrame(dh)}dh();
+// Login
+async function go(){
+  const u=document.getElementById('u').value.trim();
+  const p=document.getElementById('p').value.trim();
+  const e=document.getElementById('err');e.style.display='none';
+  const r=await fetch('/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u,password:p})});
+  const d=await r.json();
+  if(d.ok)location.href='/dashboard';else e.style.display='block';
+}
+document.addEventListener('keydown',e=>{if(e.key==='Enter')go()});
+</script>
+</body>
+</html>
