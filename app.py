@@ -115,13 +115,21 @@ sess_http  = {}   # sid -> requests.Session (con cookie)
 sess_viste = {}   # sid -> set(offer_id già visti)
 
 def _build_http_session(cookies_json):
-    """Costruisce una requests.Session con i cookie Vinted."""
+    """Costruisce una requests.Session con i cookie Vinted.
+    USA CONNESSIONE DIRETTA — mai proxy TOR con i cookie utente,
+    altrimenti Vinted trigga la verifica di sicurezza."""
     s = req_lib.Session()
-    s.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36"
+    s.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Accept-Language": "it-IT,it;q=0.9",
+        "Origin": "https://www.vinted.it",
+        "Referer": "https://www.vinted.it/",
+    })
     cookies = json.loads(cookies_json) if cookies_json else {}
     for k, v in cookies.items():
         s.cookies.set(k, v, domain=".vinted.it")
-    s.proxies = get_proxies()
+    # NO proxies — connessione diretta dal server Railway
     return s
 
 def start_monitor_server(sid, user):
@@ -489,7 +497,8 @@ def new_session():
 
 @app.route("/api/sessions/<int:sid>/cookies", methods=["POST"])
 def receive_cookies(sid):
-    """L'agent mini manda i cookie dopo il login Vinted."""
+    """L'agent mini manda i cookie dopo il login Vinted.
+    NON chiama Vinted dal server — estraiamo info dal JWT locale."""
     token = request.headers.get("X-Agent-Token", "")
     conn = get_db(); c = conn.cursor()
     c.execute('SELECT "user" FROM agent_tokens WHERE token=%s', (token,))
@@ -497,31 +506,74 @@ def receive_cookies(sid):
     if not row: conn.close(); return jsonify({"ok": False}), 401
     user = row["user"]
     cookies = request.json.get("cookies", {})
-    # Verifica che i cookie siano validi chiamando Vinted
-    vinted_user, vinted_email = _check_vinted_cookies(cookies)
+    if not cookies:
+        conn.close(); return jsonify({"ok": False, "msg": "Nessun cookie ricevuto"}), 400
+
+    # Estrai username/email dal JWT access_token_web senza fare chiamate a Vinted
+    vinted_user, vinted_email = _parse_vinted_jwt(cookies)
+
+    # Se non trovato nel JWT, usa info già salvata o placeholder
     if not vinted_user:
-        conn.close(); return jsonify({"ok": False, "msg": "Cookie non validi"}), 400
-    # Salva cookie nel DB
+        vinted_user = f"account_{sid}"
+
+    # Salva cookie nel DB e marca sessione attiva
     c.execute("""UPDATE sessions SET cookies_json=%s, vinted_user=%s, vinted_email=%s,
                  status='active', last_active=%s WHERE id=%s AND "user"=%s""",
               (json.dumps(cookies), vinted_user, vinted_email or "",
                datetime.now().strftime("%Y-%m-%d %H:%M"), sid, user))
     conn.commit(); conn.close()
-    # Avvia monitor sul server
-    start_monitor_server(sid, user)
+    # NON avviamo il monitor server-side — chiamerebbe Vinted da IP Railway
+    # e causerebbe redirect di verifica nel browser dell'utente.
+    # Il monitoring viene fatto dal desktop app (IP residenziale).
     return jsonify({"ok": True, "vinted_user": vinted_user})
 
+def _parse_vinted_jwt(cookies):
+    """Estrae username ed email dal JWT access_token_web senza fare chiamate HTTP.
+    Evita completamente di contattare Vinted dal server."""
+    import base64 as _b64
+    token = cookies.get("access_token_web", "")
+    if not token:
+        # Fallback: prova a costruire username dall'user_id cookie
+        uid = cookies.get("user_id", "")
+        return (f"user_{uid}" if uid else None), None
+    try:
+        parts = token.split(".")
+        if len(parts) < 2:
+            return None, None
+        payload_b64 = parts[1]
+        # Aggiungi padding Base64 se mancante
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        payload = json.loads(_b64.urlsafe_b64decode(payload_b64))
+        login = (payload.get("username") or payload.get("login") or
+                 payload.get("sub") or payload.get("user_login"))
+        email = payload.get("email", "")
+        return login, email
+    except Exception as e:
+        print(f"[jwt] parse error: {e}")
+        return None, None
+
 def _check_vinted_cookies(cookies):
+    """Verifica i cookie Vinted senza proxy TOR per evitare trigger di sicurezza."""
     try:
         s = req_lib.Session()
-        s.proxies = get_proxies()
-        s.headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
-        for k, v in cookies.items(): s.cookies.set(k, v, domain=".vinted.it")
-        r = s.get("https://www.vinted.it/api/v2/users/current",
-                  headers={"Accept": "application/json"}, timeout=12)
-        d = r.json(); u = d.get("user", {})
-        return u.get("login") or d.get("login"), u.get("email", "")
-    except:
+        # NO proxy TOR — connessione diretta per non triggerare Vinted security
+        s.headers.update({
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Accept-Language": "it-IT,it;q=0.9",
+        })
+        for k, v in cookies.items():
+            s.cookies.set(k, v, domain=".vinted.it")
+        r = s.get("https://www.vinted.it/api/v2/users/current", timeout=12)
+        if r.status_code != 200:
+            return None, None
+        d = r.json()
+        u = d.get("user", d)
+        login = u.get("login") or u.get("username") or d.get("login")
+        email = u.get("email", "")
+        return login, email
+    except Exception as e:
+        print(f"[!] check_vinted_cookies error: {e}")
         return None, None
 
 @app.route("/api/sessions/<int:sid>/read", methods=["POST"])
@@ -547,14 +599,47 @@ def delete_session(sid):
     conn.commit(); conn.close()
     return jsonify({"ok": True})
 
+@app.route("/api/sessions/<int:sid>/offer", methods=["POST"])
+def receive_offer(sid):
+    """Il desktop invia una nuova offerta rilevata dal monitor client-side."""
+    token = request.headers.get("X-Agent-Token", "")
+    conn = get_db(); c = conn.cursor()
+    c.execute('SELECT "user" FROM agent_tokens WHERE token=%s', (token,))
+    row = c.fetchone()
+    if not row: conn.close(); return jsonify({"ok": False}), 401
+    user = row["user"]
+    o = request.json or {}
+    offer_id = o.get("offer_id")
+    if not offer_id:
+        conn.close(); return jsonify({"ok": False}), 400
+    # Inserisci solo se non esiste già
+    c.execute("""INSERT INTO offers
+                 (session_id,"user",offer_id,utente,prezzo,msg,stato,received_at)
+                 VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+                 ON CONFLICT (offer_id) DO NOTHING
+                 RETURNING id""",
+              (sid, user, offer_id, o.get("utente","?"),
+               o.get("prezzo",""), o.get("msg",""),
+               "In attesa", datetime.now().strftime("%Y-%m-%d %H:%M")))
+    inserted = c.fetchone()
+    if inserted:
+        # Offerta nuova: incrementa contatore
+        c.execute("UPDATE sessions SET offers_count=offers_count+1 WHERE id=%s", (sid,))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True, "new": bool(inserted)})
+
+@app.route("/api/sessions/<int:sid>/products")
+def get_session_products(sid):
+    if "user" not in session: return jsonify([])
+    # Placeholder — in futuro si salveranno i prodotti caricati per sessione
+    return jsonify([])
+
 @app.route("/api/sessions/<int:sid>/monitor", methods=["POST"])
 def toggle_monitor(sid):
     if "user" not in session: return jsonify({"ok": False})
     action = request.json.get("action", "start")
-    if action == "start":
-        start_monitor_server(sid, session["user"])
-    else:
-        stop_monitor_server(sid)
+    # Monitor server-side disabilitato — chiamerebbe Vinted da IP Railway.
+    # Aggiorniamo solo il flag nel DB.
     conn = get_db(); c = conn.cursor()
     c.execute("UPDATE sessions SET monitoring=%s WHERE id=%s AND \"user\"=%s",
               (1 if action == "start" else 0, sid, session["user"]))
@@ -615,18 +700,9 @@ def startup():
     # Avvia TOR in background
     threading.Thread(target=avvia_tor, daemon=True).start()
     # Riavvia monitor per sessioni attive già nel DB
-    def _restore_monitors():
-        time.sleep(25)  # aspetta TOR
-        try:
-            conn = get_db(); c = conn.cursor()
-            c.execute("SELECT id, \"user\" FROM sessions WHERE monitoring=1 AND cookies_json IS NOT NULL")
-            rows = c.fetchall(); conn.close()
-            for r in rows:
-                start_monitor_server(r["id"], r["user"])
-                print(f"[+] Monitor ripristinato per sessione {r['id']}")
-        except Exception as e:
-            print(f"[!] Restore monitors error: {e}")
-    threading.Thread(target=_restore_monitors, daemon=True).start()
+    # Monitor server-side disabilitato (chiamerebbe Vinted da IP Railway
+    # causando redirect di verifica nel browser utente).
+    pass
 
 startup()
 
