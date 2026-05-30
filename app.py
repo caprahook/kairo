@@ -705,52 +705,7 @@ def startup():
     threading.Thread(target=avvia_tor, daemon=True).start()
     # Riavvia monitor per sessioni attive già nel DB
     # Monitor server-side disabilitato (chiamerebbe Vinted da IP Railway
-    # causando redirect di verifica nel browser utente).
-    pass
-
-startup()
-
-if __name__ == "__main__":
-    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-def update_offer(oid):
-    if "user" not in session: return jsonify({"ok": False})
-    stato = request.json.get("stato", "")
-    conn = get_db(); c = conn.cursor()
-    c.execute('UPDATE offers SET stato=%s WHERE id=%s AND "user"=%s',
-              (stato, oid, session["user"]))
-    conn.commit(); conn.close()
-    return jsonify({"ok": True})
-
-# ═════════════════════════════════════════════════════════
-#  API — STATS
-# ═════════════════════════════════════════════════════════
-@app.route("/api/stats")
-def get_stats():
-    if "user" not in session: return jsonify({})
-    conn = get_db(); c = conn.cursor(); u = session["user"]
-    c.execute('SELECT COUNT(*) as n FROM sessions WHERE "user"=%s', (u,)); sess = c.fetchone()["n"]
-    c.execute('SELECT COUNT(*) as n FROM offers WHERE "user"=%s', (u,)); offs = c.fetchone()["n"]
-    c.execute("SELECT COUNT(*) as n FROM offers WHERE \"user\"=%s AND stato='Completata'", (u,)); comp = c.fetchone()["n"]
-    c.execute('SELECT COUNT(*) as n FROM sessions WHERE "user"=%s AND monitoring=1', (u,)); mon = c.fetchone()["n"]
-    conn.close()
-    rate = f"{int(comp/max(offs,1)*100)}%" if offs else "—%"
-    return jsonify({"sessions": sess, "offers": offs, "success_rate": rate, "monitoring": mon})
-
-# ═════════════════════════════════════════════════════════
-#  HELPERS
-# ═════════════════════════════════════════════════════════
-def _send_cmd(user, cmd):
-    if user not in events: events[user] = []
-    events[user].append(cmd)
-
-# ═════════════════════════════════════════════════════════
-#  STARTUP
-# ═════════════════════════════════════════════════════════
-def startup():
-    init_db()
-    threading.Thread(target=avvia_tor, daemon=True).start()
-    # Monitor server-side disabilitato (chiamerebbe Vinted da IP Railway)
-    pass
+    pass  # Monitor server-side disabilitato
 
 startup()
 
