@@ -505,14 +505,18 @@ def receive_cookies(sid):
     row = c.fetchone()
     if not row: conn.close(); return jsonify({"ok": False}), 401
     user = row["user"]
-    cookies = request.json.get("cookies", {})
+    body = request.json or {}
+    cookies = body.get("cookies", {})
     if not cookies:
         conn.close(); return jsonify({"ok": False, "msg": "Nessun cookie ricevuto"}), 400
 
-    # Estrai username/email dal JWT access_token_web senza fare chiamate a Vinted
-    vinted_user, vinted_email = _parse_vinted_jwt(cookies)
+    # Il desktop manda già username/email estratti dal JWT localmente
+    vinted_user  = body.get("vinted_user", "").strip()
+    vinted_email = body.get("vinted_email", "").strip()
 
-    # Se non trovato nel JWT, usa info già salvata o placeholder
+    # Fallback: prova a estrarre dal JWT lato server
+    if not vinted_user:
+        vinted_user, vinted_email = _parse_vinted_jwt(cookies)
     if not vinted_user:
         vinted_user = f"account_{sid}"
 
@@ -702,6 +706,50 @@ def startup():
     # Riavvia monitor per sessioni attive già nel DB
     # Monitor server-side disabilitato (chiamerebbe Vinted da IP Railway
     # causando redirect di verifica nel browser utente).
+    pass
+
+startup()
+
+if __name__ == "__main__":
+    app.run(debug=False, host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+def update_offer(oid):
+    if "user" not in session: return jsonify({"ok": False})
+    stato = request.json.get("stato", "")
+    conn = get_db(); c = conn.cursor()
+    c.execute('UPDATE offers SET stato=%s WHERE id=%s AND "user"=%s',
+              (stato, oid, session["user"]))
+    conn.commit(); conn.close()
+    return jsonify({"ok": True})
+
+# ═════════════════════════════════════════════════════════
+#  API — STATS
+# ═════════════════════════════════════════════════════════
+@app.route("/api/stats")
+def get_stats():
+    if "user" not in session: return jsonify({})
+    conn = get_db(); c = conn.cursor(); u = session["user"]
+    c.execute('SELECT COUNT(*) as n FROM sessions WHERE "user"=%s', (u,)); sess = c.fetchone()["n"]
+    c.execute('SELECT COUNT(*) as n FROM offers WHERE "user"=%s', (u,)); offs = c.fetchone()["n"]
+    c.execute("SELECT COUNT(*) as n FROM offers WHERE \"user\"=%s AND stato='Completata'", (u,)); comp = c.fetchone()["n"]
+    c.execute('SELECT COUNT(*) as n FROM sessions WHERE "user"=%s AND monitoring=1', (u,)); mon = c.fetchone()["n"]
+    conn.close()
+    rate = f"{int(comp/max(offs,1)*100)}%" if offs else "—%"
+    return jsonify({"sessions": sess, "offers": offs, "success_rate": rate, "monitoring": mon})
+
+# ═════════════════════════════════════════════════════════
+#  HELPERS
+# ═════════════════════════════════════════════════════════
+def _send_cmd(user, cmd):
+    if user not in events: events[user] = []
+    events[user].append(cmd)
+
+# ═════════════════════════════════════════════════════════
+#  STARTUP
+# ═════════════════════════════════════════════════════════
+def startup():
+    init_db()
+    threading.Thread(target=avvia_tor, daemon=True).start()
+    # Monitor server-side disabilitato (chiamerebbe Vinted da IP Railway)
     pass
 
 startup()
